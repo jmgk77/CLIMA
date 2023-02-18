@@ -37,6 +37,7 @@ float temperature = 0, humidity = 0;
 #define MAX_TH_INFO 24 * 32
 
 struct TH_INFO {
+  time_t tempo;
   float temperature;
   float humidity;
 };
@@ -109,10 +110,12 @@ void handle_root() {
   int start = (th_index > GRAPH_RANGE) ? th_index - GRAPH_RANGE : 0;
 
   for (int i = 0; i < count; i++) {
-    snprintf_P(buf, sizeof(buf), "%d -> %.01f,%.01f\n", i,
+    snprintf_P(buf, sizeof(buf), "%d -> %.01f,%.01f<br>", i,
                th_info[start + i].temperature, th_info[start + i].humidity);
     server.sendContent(buf);
   }
+  ////////////////////////////
+
   server.sendContent(html_footer);
 }
 
@@ -223,14 +226,13 @@ void handle_files() {
     while (dir.next()) {
       if (dir.isFile()) {
         s = "<a download='" + dir.fileName() +
-            "' href='files?n=" + dir.fileName() + "'><button>" +
-            dir.fileName() + "</button></a>";
+            "' href='files?n=" + dir.fileName() + "'>" + dir.fileName() +
+            "</a>";
         itoa(dir.fileSize(), buf, 10);
         s += "    (" + String(buf) + ")    ";
         const time_t t = dir.fileTime();
         s += String(ctime(&t));
-        s += "<a href='files?x=" + dir.fileName() +
-             "'><button>x</button></a><br>";
+        s += "<a href='files?x=" + dir.fileName() + "'>x</a><br>";
         server.sendContent(s);
       }
     }
@@ -310,22 +312,47 @@ void setup() {
   }
 }
 
+void dump_csv(char *nome, unsigned int inicio) {
+  char buf[64];
+
+  // create
+  File f = SPIFFS.open(nome, "w");
+  if (f) {
+    // CSV header
+    f.printf("Hora, Data, Temperatura, Humidade\n");
+    // loop database
+    for (unsigned int i = inicio; i < th_index; i++) {
+      // write
+      strftime(buf, sizeof(buf), "T, %d-%m-%Y", gmtime(&th_info[i].tempo));
+      f.printf("%s, %.01f, %.01f\n", buf, th_info[i].temperature,
+               th_info[i].humidity);
+    }
+    // close
+    f.close();
+  }
+}
+
 void loop() {
+  char buf[64];
+
   // web things
   server.handleClient();
   MDNS.update();
   SSDP_esp8266.handleClient();
 
-  // log temperatura and humidity
+  // get time
   struct tm now, last;
   time_t t = time(NULL);
   gmtime_r(&t, &now);
   gmtime_r(&current_time, &last);
+
   // check if hour changed
   if (now.tm_hour != last.tm_hour) {
     current_time = t;
     get_sensors();
-    // save hourly data
+
+    // log temperatura and humidity
+    th_info[th_index].tempo = t;
     th_info[th_index].temperature = temperature;
     th_info[th_index].humidity = humidity;
     th_index++;
@@ -340,41 +367,19 @@ void loop() {
     //  check if day changed
     if (now.tm_mday != last.tm_mday) {
       // gera nome do arquivo
-      char buf[64];
-      snprintf(buf, sizeof(buf), "%02d_%02d.%04d", now.tm_mday, now.tm_mon,
+      snprintf(buf, sizeof(buf), "%02d%02d%04d.csv", now.tm_mday, now.tm_mon,
                now.tm_year + 1900);
       // write arquivo diario
-      File f = SPIFFS.open(buf, "w");
-      if (f) {
-        // if we have more than 24 entries, write last 24
-        for (unsigned int i = (th_index < 24) ? 0 : (th_index - 24);
-             i < th_index; i++) {
-          // write
-          f.printf("%.01f,%.01f\n", th_info[i].temperature,
-                   th_info[i].humidity);
-        }
-        // close arquivo diario
-        f.close();
-      }
+      dump_csv(buf, (th_index < 24) ? 0 : (th_index - 24));
     }
 
     // check if month changed
     if (now.tm_mon != last.tm_mon) {
       // gera nome do arquivo
-      char buf[64];
-      snprintf(buf, sizeof(buf), "%02d.%04d", now.tm_mon, now.tm_year + 1900);
+      snprintf(buf, sizeof(buf), "%02d%04d.csv", now.tm_mon,
+               now.tm_year + 1900);
       // write arquivo mensal
-      File f = SPIFFS.open(buf, "w");
-      if (f) {
-        // write whole data
-        for (unsigned int i = 0; i < th_index; i++) {
-          // write
-          f.printf("%.01f,%.01f\n", th_info[i].temperature,
-                   th_info[i].humidity);
-        }
-        // close arquivo mensal
-        f.close();
-      }
+      dump_csv(buf, 0);
 
       // reset data
       th_index = 0;
