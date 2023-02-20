@@ -323,7 +323,7 @@ void dump_csv(char *nome, unsigned int inicio) {
     // loop database
     for (unsigned int i = inicio; i < th_index; i++) {
       // write
-      strftime(buf, sizeof(buf), "T, %d-%m-%Y", gmtime(&th_info[i].tempo));
+      strftime(buf, sizeof(buf), "%T, %d-%m-%Y", gmtime(&th_info[i].tempo));
       f.printf("%s, %.01f, %.01f\n", buf, th_info[i].temperature,
                th_info[i].humidity);
     }
@@ -367,8 +367,7 @@ void loop() {
     //  check if day changed
     if (now.tm_mday != last.tm_mday) {
       // gera nome do arquivo
-      snprintf(buf, sizeof(buf), "%02d%02d%04d.csv", now.tm_mday, now.tm_mon,
-               now.tm_year + 1900);
+      strftime(buf, sizeof(buf), "%d%m%Y.csv", &now);
       // write arquivo diario
       dump_csv(buf, (th_index < 24) ? 0 : (th_index - 24));
     }
@@ -376,8 +375,7 @@ void loop() {
     // check if month changed
     if (now.tm_mon != last.tm_mon) {
       // gera nome do arquivo
-      snprintf(buf, sizeof(buf), "%02d%04d.csv", now.tm_mon,
-               now.tm_year + 1900);
+      strftime(buf, sizeof(buf), "%m%Y.csv", &now);
       // write arquivo mensal
       dump_csv(buf, 0);
 
