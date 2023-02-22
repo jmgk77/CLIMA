@@ -124,7 +124,7 @@ void handle_root() {
   server.sendContent("];\nconst l_data = [");
   for (int i = 0; i < count; i++) {
     // if ((i % 12) == 0) {
-    strftime(buf, sizeof(buf), "\"%c\",", gmtime(&th_info[start + i].tempo));
+    strftime(buf, sizeof(buf), "\"%c\",", localtime(&th_info[start + i].tempo));
     // } else {
     //   strcat(buf, "\"\",");
     // }
@@ -364,7 +364,7 @@ void dump_csv(char *nome, unsigned int inicio) {
     // loop database
     for (unsigned int i = inicio; i < th_index; i++) {
       // write
-      strftime(buf, sizeof(buf), "%T, %d-%m-%Y", gmtime(&th_info[i].tempo));
+      strftime(buf, sizeof(buf), "%T, %d-%m-%Y", localtime(&th_info[i].tempo));
       f.printf("%s, %.01f, %.01f\n", buf, th_info[i].temperature,
                th_info[i].humidity);
     }
@@ -384,8 +384,8 @@ void loop() {
   // get time
   struct tm now, last;
   time_t t = time(NULL);
-  gmtime_r(&t, &now);
-  gmtime_r(&current_time, &last);
+  localtime_r(&t, &now);
+  localtime_r(&current_time, &last);
 
   // check if hour changed
   if (now.tm_hour != last.tm_hour) {
