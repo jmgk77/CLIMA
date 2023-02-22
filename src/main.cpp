@@ -53,6 +53,7 @@ const char html_header[] PROGMEM = R""""(<!DOCTYPE html>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <meta http-equiv='cache-control' content='no-cache, no-store, must-revalidate'>
 <meta http-equiv='refresh' content='600; url=/' />
+<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
 <link rel='stylesheet' href='https://cdn.simplecss.org/simple.min.css'>
 <title>CLIMA</title>
 </head>
@@ -98,23 +99,63 @@ void handle_root() {
   snprintf_P(buf, sizeof(buf),
              PSTR("Temperature: %.01f<br>"
                   "Humidity: %.01f<br>"
-                  "Data: %d<br>"),
+                  "<canvas id='canvas' width='600' height='200'></canvas>"),
              temperature, humidity, th_index);
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send_P(200, "text/html", html_header);
   server.sendContent(buf);
 
-  ////////////////////////////
+  // calcula quantos itens vamos mostrar
   int count = (th_index > GRAPH_RANGE) ? GRAPH_RANGE : th_index;
   int start = (th_index > GRAPH_RANGE) ? th_index - GRAPH_RANGE : 0;
 
+  // write data
+  server.sendContent("<script>const t_data = [");
   for (int i = 0; i < count; i++) {
-    snprintf_P(buf, sizeof(buf), "%d -> %.01f,%.01f<br>", i,
-               th_info[start + i].temperature, th_info[start + i].humidity);
+    snprintf_P(buf, sizeof(buf), "%.01f,", th_info[start + i].temperature);
     server.sendContent(buf);
   }
-  ////////////////////////////
+  server.sendContent("];\nconst h_data = [");
+  for (int i = 0; i < count; i++) {
+    snprintf_P(buf, sizeof(buf), "%.01f,", th_info[start + i].humidity);
+    server.sendContent(buf);
+  }
+  server.sendContent("];\nconst l_data = [");
+  for (int i = 0; i < count; i++) {
+    // if ((i % 12) == 0) {
+    strftime(buf, sizeof(buf), "\"%c\",", gmtime(&th_info[start + i].tempo));
+    // } else {
+    //   strcat(buf, "\"\",");
+    // }
+    server.sendContent(buf);
+  }
+
+  // write javascript
+  server.sendContent_P(PSTR(R""""(];
+var canvas = document.getElementById('canvas');
+var ctx = canvas.getContext('2d');
+var myChart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: l_data,
+    datasets: [{
+      label: 'Temperature',
+      data: t_data,
+      borderColor: 'rgb(255, 0, 0)',
+      backgroundColor: 'rgb(255, 0, 0, 0.1)',
+      tension: 0.1,
+    }, {
+      label: 'Humidity',
+      data: h_data,
+      borderColor: 'rgb(0, 0, 255)',
+      backgroundColor: 'rgb(0, 0, 255, 0.1)',
+      tension: 0.1,}]
+    }
+  }
+);
+</script>
+)""""));
 
   server.sendContent(html_footer);
 }
