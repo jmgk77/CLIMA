@@ -1,3 +1,15 @@
+// CLIMA
+//
+// Firmware for https://aliexpress.com/item/32840839415.html
+//
+// * show current temp/humidty
+// * show current month temp/humidty graph
+// * save daily/monthly info in CSV format
+// * partial data survive reboots
+// * file server/update server
+// * WiFi wizard
+// * SSDP, LLMR, MDNS. NBNS discovery protocols
+
 #if !defined(ESP8266)
 #error This code is designed to run on ESP8266 and ESP8266-based boards! Please check your Tools->Board setting.
 #endif
@@ -52,14 +64,19 @@ const char html_header[] PROGMEM = R""""(<!DOCTYPE html>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <meta http-equiv='cache-control' content='no-cache, no-store, must-revalidate'>
-<meta http-equiv='refresh' content='600; url=/' />
+<meta http-equiv='refresh' content='600; url=/'>
 <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
 <link rel='stylesheet' href='https://cdn.simplecss.org/simple.min.css'>
 <title>CLIMA</title>
 </head>
-<body><div>)"""";
+<body><div style='text-align: center'>
+<a href='/'><button>MAIN</button></a>
+<a href='config'><button>CONFIG</button></a>
+<a href='files'><button>FILES</button></a>
+)"""";
 
-const char html_footer[] PROGMEM = R""""(</div>
+const char html_footer[] PROGMEM = R""""(
+</div>
 </body>
 </html>
 )"""";
@@ -97,9 +114,9 @@ void handle_root() {
   char buf[512];
   get_sensors();
   snprintf_P(buf, sizeof(buf),
-             PSTR("Temperature: %.01f<br>"
+             PSTR("<div style='border: 1px solid black'>Temperature: %.01f<br>"
                   "Humidity: %.01f<br>"
-                  "<canvas id='canvas' width='600' height='200'></canvas>"),
+                  "<canvas id='c' width='600' height='200'></canvas></div>"),
              temperature, humidity, th_index);
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
@@ -111,47 +128,43 @@ void handle_root() {
   int start = (th_index > GRAPH_RANGE) ? th_index - GRAPH_RANGE : 0;
 
   // write data
-  server.sendContent("<script>const t_data = [");
+  server.sendContent("<script>const t = [");
   for (int i = 0; i < count; i++) {
     snprintf_P(buf, sizeof(buf), "%.01f,", th_info[start + i].temperature);
     server.sendContent(buf);
   }
-  server.sendContent("];\nconst h_data = [");
+  server.sendContent("];\nconst h = [");
   for (int i = 0; i < count; i++) {
     snprintf_P(buf, sizeof(buf), "%.01f,", th_info[start + i].humidity);
     server.sendContent(buf);
   }
-  server.sendContent("];\nconst l_data = [");
+  server.sendContent("];\nconst l = [");
   for (int i = 0; i < count; i++) {
-    // if ((i % 12) == 0) {
     strftime(buf, sizeof(buf), "\"%c\",", localtime(&th_info[start + i].tempo));
-    // } else {
-    //   strcat(buf, "\"\",");
-    // }
     server.sendContent(buf);
   }
 
   // write javascript
   server.sendContent_P(PSTR(R""""(];
-var canvas = document.getElementById('canvas');
+var canvas = document.getElementById('c');
 var ctx = canvas.getContext('2d');
 var myChart = new Chart(ctx, {
   type: 'line',
   data: {
-    labels: l_data,
+    labels: l,
     datasets: [{
       label: 'Temperature',
-      data: t_data,
+      data: t,
       borderColor: 'rgb(255, 0, 0)',
       backgroundColor: 'rgb(255, 0, 0, 0.1)',
       tension: 0.1,
     }, {
       label: 'Humidity',
-      data: h_data,
+      data: h,
       borderColor: 'rgb(0, 0, 255)',
       backgroundColor: 'rgb(0, 0, 255, 0.1)',
       tension: 0.1,}]
-    }
+    },
   }
 );
 </script>
@@ -171,7 +184,7 @@ void handle_raw() {
 
 void handle_config() {
   // info
-  char buf[2048];
+  char buf[1536];
   sensor_t sensor_t, sensor_h;
 
   dht.temperature().getSensor(&sensor_t);
@@ -182,7 +195,8 @@ void handle_config() {
 
   snprintf_P(
       buf, sizeof(buf),
-      PSTR("Build time: %s<br>Boot time: %s<br>IP: %s<br><br>"
+      PSTR("<div style='border: 1px solid black'>Build time: %s<br>Boot time: "
+           "%s<br>IP: %s<br><br>"
 
            "ESP8266_INFO<br>ESP.getBootMode(): %d<br>ESP.getSdkVersion(): "
            "%s<br>ESP.getBootVersion(): %d<br>ESP.getChipId(): %08x<br>    "
@@ -199,11 +213,11 @@ void handle_config() {
            "FS_INFO<br>fs_info.totalBytes(): %d<br>fs_info.usedBytes(): "
            "%d<br>fs_info.blockSize(): %d<br>fs_info.pageSize(): "
            "%d<br>fs_info.maxOpenFiles(): %d<br>fs_info.maxPathLength(): "
-           "%d<br><br>"
+           "%d<br><br></div>"
 
-           "<a href='update'><button>update</button></a><br><a "
-           "href='reboot'><button>reboot</button></a><br><a "
-           "href='reset'><button>reset</button></a>"),
+           "<a href='update'><button>UPDATE</button></a>\n<a "
+           "href='reboot'><button>REBOOT</button></a>\n<a "
+           "href='reset'><button>RESET</button></a>\n"),
       __DATE__ " " __TIME__, ctime(&boot_time),
       WiFi.localIP().toString().c_str(), ESP.getBootMode(), ESP.getSdkVersion(),
       ESP.getBootVersion(), ESP.getChipId(), ESP.getFlashChipSize(),
@@ -261,6 +275,8 @@ void handle_files() {
     String s;
     server.send_P(200, "text/html", html_header);
 
+    server.sendContent("<div style='border: 1px solid black'>");
+
     //    Dir dir = SPIFFS.openDir("/");
     Dir dir = SPIFFS.openDir("");
 
@@ -277,7 +293,8 @@ void handle_files() {
         server.sendContent(s);
       }
     }
-    server.sendContent("<br><br><a href='/'><button>BACK</button></a><br>");
+    // server.sendContent("<br><br><a href='/'><button>BACK</button></a><br>");
+    server.sendContent("</div>");
     server.sendContent(html_footer);
   }
 }
@@ -362,7 +379,7 @@ void dump_csv(char *nome, unsigned int inicio) {
     // CSV header
     f.printf("Hora, Data, Temperatura, Humidade\n");
     // loop database
-    for (unsigned int i = inicio; i < th_index; i++) {
+    for (unsigned int i = inicio; i < (th_index - 1); i++) {
       // write
       strftime(buf, sizeof(buf), "%T, %d-%m-%Y", localtime(&th_info[i].tempo));
       f.printf("%s, %.01f, %.01f\n", buf, th_info[i].temperature,
@@ -410,7 +427,7 @@ void loop() {
       // gera nome do arquivo
       strftime(buf, sizeof(buf), "%d%m%Y.csv", &now);
       // write arquivo diario
-      dump_csv(buf, (th_index < 24) ? 0 : (th_index - 24));
+      dump_csv(buf, (th_index < 24) ? 0 : (th_index - 25));
     }
 
     // check if month changed
@@ -420,8 +437,12 @@ void loop() {
       // write arquivo mensal
       dump_csv(buf, 0);
 
-      // reset data
-      th_index = 0;
+      // reset data (move last entry to first)
+      th_info[0].tempo = th_info[th_index].tempo;
+      th_info[0].temperature = th_info[th_index].temperature;
+      th_info[0].humidity = th_info[th_index].humidity;
+
+      th_index = 1;
       SPIFFS.remove("CACHE");
     }
   }
