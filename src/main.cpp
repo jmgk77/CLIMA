@@ -184,7 +184,7 @@ void handle_raw() {
 
 void handle_config() {
   // info
-  char buf[1536];
+  char buf[2048];
   sensor_t sensor_t, sensor_h;
 
   dht.temperature().getSensor(&sensor_t);
@@ -202,7 +202,8 @@ void handle_config() {
            "%s<br>ESP.getBootVersion(): %d<br>ESP.getChipId(): %08x<br>    "
            "ESP.getFlashChipSize(): %d<br>ESP.getFlashChipRealSize(): "
            "%d<br>ESP.getFlashChipSizeByChipId(): %d<br>ESP.getFlashChipId(): "
-           "%08x<br>ESP.getFreeHeap(): %d<br><br>"
+           "%08x<br>ESP.getFreeHeap(): %d<br>ESP.getSketchSize(): "
+           "%d<br>ESP.getFreeSketchSpace(): %d<br><br>"
 
            "DHT11_TEMP<br>t.sensor(): %s<br>t.driver(): %d<br>t.id(): "
            "%d<br>t.max(): %f<br>t.min(): %f<br>t.resolution(): %f<br><br>"
@@ -223,7 +224,8 @@ void handle_config() {
       WiFi.localIP().toString().c_str(), ESP.getBootMode(), ESP.getSdkVersion(),
       ESP.getBootVersion(), ESP.getChipId(), ESP.getFlashChipSize(),
       ESP.getFlashChipRealSize(), ESP.getFlashChipSizeByChipId(),
-      ESP.getFlashChipId(), ESP.getFreeHeap(), sensor_t.name, sensor_t.version,
+      ESP.getFlashChipId(), ESP.getFreeHeap(), ESP.getSketchSize(),
+      ESP.getFreeSketchSpace(), sensor_t.name, sensor_t.version,
       sensor_t.sensor_id, sensor_t.max_value, sensor_t.min_value,
       sensor_t.resolution, sensor_h.name, sensor_h.version, sensor_h.sensor_id,
       sensor_h.max_value, sensor_h.min_value, sensor_h.resolution,
