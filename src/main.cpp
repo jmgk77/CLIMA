@@ -30,6 +30,7 @@
 #include <WiFiManager.h>
 
 #define GETTIME_RETRIES 30
+bool notime;
 
 #define DHTPIN 2      // Pin which is connected to the DHT sensor.
 #define DHTTYPE DHT11 // DHT 11
@@ -55,7 +56,6 @@ struct TH_INFO {
 };
 
 TH_INFO th_info[MAX_TH_INFO];
-
 unsigned int th_index = 0;
 
 const char html_header[] PROGMEM = R""""(<!DOCTYPE html>
@@ -196,7 +196,7 @@ void handle_config() {
   snprintf_P(
       buf, sizeof(buf),
       PSTR("<div style='border: 1px solid black'>Build time: %s<br>Boot time: "
-           "%s<br>IP: %s<br><br>"
+           "%s<br>Last reading: %s<br>IP: %s<br><br>"
 
            "ESP8266_INFO<br>ESP.getBootMode(): %d<br>ESP.getSdkVersion(): "
            "%s<br>ESP.getBootVersion(): %d<br>ESP.getChipId(): %08x<br>    "
@@ -219,6 +219,7 @@ void handle_config() {
            "href='reboot'><button>REBOOT</button></a>\n<a "
            "href='reset'><button>RESET</button></a>\n"),
       __DATE__ " " __TIME__, ctime(&boot_time),
+      notime ? "<font color='red'>NOTIME</font>" : ctime(&current_time),
       WiFi.localIP().toString().c_str(), ESP.getBootMode(), ESP.getSdkVersion(),
       ESP.getBootVersion(), ESP.getChipId(), ESP.getFlashChipSize(),
       ESP.getFlashChipRealSize(), ESP.getFlashChipSizeByChipId(),
@@ -299,6 +300,18 @@ void handle_files() {
   }
 }
 
+void get_time() {
+  // get internet time
+  configTime("<-03>3", "pool.ntp.org");
+  // verify 2021...
+  int t = 0;
+  while ((time(nullptr) < 1609459200) && (t < GETTIME_RETRIES)) {
+    t++;
+    delay(100);
+  }
+  notime = (time(nullptr) < 1609459200) ? true : false;
+}
+
 void setup() {
   // setup WIFI
   WiFi.mode(WIFI_STA);
@@ -343,16 +356,8 @@ void setup() {
   SSDP_esp8266.setManufacturer("JMGK");
   SSDP_esp8266.setManufacturerURL("http://www.jmgk.com.br/");
 
-  // get internet time
-  configTime("<-03>3", "pool.ntp.org");
-  // verifica 2021...
-  int t = 0;
-  while ((time(nullptr) < 1609459200) && (t < GETTIME_RETRIES)) {
-    t++;
-    delay(100);
-  }
-
   // set boot/current time
+  get_time();
   current_time = boot_time = time(NULL);
 
   // init sensor
@@ -367,6 +372,10 @@ void setup() {
     th_index = f.read((uint8_t *)&th_info, sizeof(th_info));
     th_index /= sizeof(TH_INFO);
     f.close();
+    // get last read time from cache
+    if (th_index) {
+      current_time = th_info[th_index - 1].tempo;
+    }
   }
 }
 
@@ -398,52 +407,57 @@ void loop() {
   MDNS.update();
   SSDP_esp8266.handleClient();
 
-  // get time
-  struct tm now, last;
-  time_t t = time(NULL);
-  localtime_r(&t, &now);
-  localtime_r(&current_time, &last);
+  // we cant do anything till we get the clock
+  if (notime) {
+    get_time();
+  } else {
+    // get time
+    struct tm now, last;
+    time_t t = time(NULL);
+    localtime_r(&t, &now);
+    localtime_r(&current_time, &last);
 
-  // check if hour changed
-  if (now.tm_hour != last.tm_hour) {
-    current_time = t;
-    get_sensors();
+    // check if hour changed
+    if (now.tm_hour != last.tm_hour) {
+      current_time = t;
+      get_sensors();
 
-    // log temperatura and humidity
-    th_info[th_index].tempo = t;
-    th_info[th_index].temperature = temperature;
-    th_info[th_index].humidity = humidity;
-    th_index++;
+      // log temperatura and humidity
+      th_info[th_index].tempo = t;
+      th_info[th_index].temperature = temperature;
+      th_info[th_index].humidity = humidity;
+      th_index++;
 
-    // write temporary binary cache
-    File f = SPIFFS.open("CACHE", "w");
-    if (f) {
-      f.write((uint8_t *)&th_info, th_index * sizeof(TH_INFO));
-      f.close();
-    }
+      // write temporary binary cache
+      File f = SPIFFS.open("CACHE", "w");
+      if (f) {
+        f.write((uint8_t *)&th_info, th_index * sizeof(TH_INFO));
+        f.close();
+      }
 
-    //  check if day changed
-    if (now.tm_mday != last.tm_mday) {
-      // gera nome do arquivo
-      strftime(buf, sizeof(buf), "%d%m%Y.csv", &now);
-      // write arquivo diario
-      dump_csv(buf, (th_index < 24) ? 0 : (th_index - 25));
-    }
+      //  check if day changed
+      if (now.tm_mday != last.tm_mday) {
+        // gera nome do arquivo
+        strftime(buf, sizeof(buf), "%d%m%Y.csv", &now);
+        // write arquivo diario
+        dump_csv(buf, (th_index < 24) ? 0 : (th_index - 25));
+      }
 
-    // check if month changed
-    if (now.tm_mon != last.tm_mon) {
-      // gera nome do arquivo
-      strftime(buf, sizeof(buf), "%m%Y.csv", &now);
-      // write arquivo mensal
-      dump_csv(buf, 0);
+      // check if month changed
+      if (now.tm_mon != last.tm_mon) {
+        // gera nome do arquivo
+        strftime(buf, sizeof(buf), "%m%Y.csv", &now);
+        // write arquivo mensal
+        dump_csv(buf, 0);
 
-      // reset data (move last entry to first)
-      th_info[0].tempo = th_info[th_index].tempo;
-      th_info[0].temperature = th_info[th_index].temperature;
-      th_info[0].humidity = th_info[th_index].humidity;
+        // reset data (move last entry to first)
+        th_info[0].tempo = th_info[th_index - 1].tempo;
+        th_info[0].temperature = th_info[th_index - 1].temperature;
+        th_info[0].humidity = th_info[th_index - 1].humidity;
 
-      th_index = 1;
-      SPIFFS.remove("CACHE");
+        th_index = 1;
+        SPIFFS.remove("CACHE");
+      }
     }
   }
 }
