@@ -439,6 +439,9 @@ void loop() {
 
       //  check if day changed
       if (now.tm_mday != last.tm_mday) {
+        // get yesterday
+        now.tm_mday--;
+        mktime(&now);
         // gera nome do arquivo
         strftime(buf, sizeof(buf), "%d%m%Y.csv", &now);
         // write arquivo diario
@@ -447,6 +450,9 @@ void loop() {
 
       // check if month changed
       if (now.tm_mon != last.tm_mon) {
+        // get yesterday
+        now.tm_mday--;
+        mktime(&now);
         // gera nome do arquivo
         strftime(buf, sizeof(buf), "%m%Y.csv", &now);
         // write arquivo mensal
