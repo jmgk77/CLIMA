@@ -413,11 +413,16 @@ void loop() {
   if (notime) {
     get_time();
   } else {
-    // get time
-    struct tm now, last;
+    struct tm now, last, yesterday;
+    // get date/time now
     time_t t = time(NULL);
     localtime_r(&t, &now);
+    // get last update date
     localtime_r(&current_time, &last);
+    // get yesterday date (for filenames porpouse)
+    yesterday = now;
+    yesterday.tm_mday--;
+    mktime(&yesterday);
 
     // check if hour changed
     if (now.tm_hour != last.tm_hour) {
@@ -439,22 +444,16 @@ void loop() {
 
       //  check if day changed
       if (now.tm_mday != last.tm_mday) {
-        // get yesterday
-        now.tm_mday--;
-        mktime(&now);
         // gera nome do arquivo
-        strftime(buf, sizeof(buf), "%d%m%Y.csv", &now);
+        strftime(buf, sizeof(buf), "%d%m%Y.csv", &yesterday);
         // write arquivo diario
         dump_csv(buf, (th_index < 24) ? 0 : (th_index - 25));
       }
 
       // check if month changed
       if (now.tm_mon != last.tm_mon) {
-        // get yesterday
-        now.tm_mday--;
-        mktime(&now);
         // gera nome do arquivo
-        strftime(buf, sizeof(buf), "%m%Y.csv", &now);
+        strftime(buf, sizeof(buf), "%m%Y.csv", &yesterday);
         // write arquivo mensal
         dump_csv(buf, 0);
 
