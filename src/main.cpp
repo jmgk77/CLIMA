@@ -10,6 +10,8 @@
 // * WiFi wizard
 // * SSDP, LLMR, MDNS. NBNS discovery protocols
 
+// ??? show monthly history (read from disk)
+
 #if !defined(ESP8266)
 #error This code is designed to run on ESP8266 and ESP8266-based boards! Please check your Tools->Board setting.
 #endif
@@ -369,7 +371,7 @@ void setup() {
   SPIFFS.begin();
 
   // load temporary binary cache
-  File f = SPIFFS.open("CACHE", "r");
+  File f = SPIFFS.open("/CACHE", "r");
   if (f) {
     th_index = f.read((uint8_t *)&th_info, sizeof(th_info));
     th_index /= sizeof(TH_INFO);
@@ -436,7 +438,7 @@ void loop() {
       th_index++;
 
       // write temporary binary cache
-      File f = SPIFFS.open("CACHE", "w");
+      File f = SPIFFS.open("/CACHE", "w");
       if (f) {
         f.write((uint8_t *)&th_info, th_index * sizeof(TH_INFO));
         f.close();
@@ -445,7 +447,7 @@ void loop() {
       //  check if day changed
       if (now.tm_mday != last.tm_mday) {
         // gera nome do arquivo
-        strftime(buf, sizeof(buf), "%d%m%Y.csv", &yesterday);
+        strftime(buf, sizeof(buf), "/%d%m%Y.csv", &yesterday);
         // write arquivo diario
         dump_csv(buf, (th_index < 24) ? 0 : (th_index - 25));
       }
@@ -453,7 +455,7 @@ void loop() {
       // check if month changed
       if (now.tm_mon != last.tm_mon) {
         // gera nome do arquivo
-        strftime(buf, sizeof(buf), "%m%Y.csv", &yesterday);
+        strftime(buf, sizeof(buf), "/%m%Y.csv", &yesterday);
         // write arquivo mensal
         dump_csv(buf, 0);
 
@@ -463,7 +465,7 @@ void loop() {
         th_info[0].humidity = th_info[th_index - 1].humidity;
 
         th_index = 1;
-        SPIFFS.remove("CACHE");
+        SPIFFS.remove("/CACHE");
       }
     }
   }
