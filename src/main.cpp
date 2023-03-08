@@ -9,6 +9,7 @@
 // * file server/update server
 // * WiFi wizard
 // * SSDP, LLMR, MDNS. NBNS discovery protocols
+// * MQTT support
 
 // ??? show monthly history (read from disk)
 
@@ -27,39 +28,61 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
+#include <ESP_EEPROM.h>
 #include <FS.h>
+#include <PubSubClient.h>
 #include <SSDP_esp8266.h>
 #include <WiFiManager.h>
 
-#define GETTIME_RETRIES 30
-bool notime;
-
-#define DHTPIN 2      // Pin which is connected to the DHT sensor.
-#define DHTTYPE DHT11 // DHT 11
-
-DHT_Unified dht(DHTPIN, DHTTYPE);
+#define DAILY_FILE
 
 const char *device_name = "CLIMA";
 
+// time
+#define GETTIME_RETRIES 30
+bool notime;
+time_t boot_time, current_time;
+
+// sensor
+#define DHTPIN 2      // Pin which is connected to the DHT sensor.
+#define DHTTYPE DHT11 // DHT 11
+DHT_Unified dht(DHTPIN, DHTTYPE);
+float temperature = 0, humidity = 0;
+
+// mqtt
+#define MQTT_REFRESH 1
+#define MQTT_CLIMA_LOCALIP "CLIMA/IP"
+#define MQTT_CLIMA_TEMPERATURE "CLIMA/TEMPERATURE"
+#define MQTT_CLIMA_HUMIDITY "CLIMA/HUMIDITY"
+unsigned long mqtt_interval;
+WiFiClient mqtt_client;
+PubSubClient mqtt(mqtt_client);
+
+// eeprom
+#define EEPROM_SIGNATURE 'J'
+struct eeprom_data {
+  char sign = EEPROM_SIGNATURE;
+  char mqtt_server[32]; // = "192.168.0.250";
+  unsigned int mqtt_server_port = 1883;
+} eeprom;
+
+// www
 WiFiManager wm;
 ESP8266WebServer server;
 ESP8266HTTPUpdateServer httpUpdater;
 
-time_t boot_time, current_time;
-
-float temperature = 0, humidity = 0;
-
+// graph
+#define GRAPH_RANGE 24 * 7
 #define MAX_TH_INFO 24 * 32
-
 struct TH_INFO {
   time_t tempo;
   float temperature;
   float humidity;
 };
-
 TH_INFO th_info[MAX_TH_INFO];
 unsigned int th_index = 0;
 
+// html
 const char html_header[] PROGMEM = R""""(<!DOCTYPE html>
 <html lang='pt-br'>
 <head>
@@ -81,6 +104,56 @@ const char html_footer[] PROGMEM = R""""(
 </div>
 </body>
 </html>
+)"""";
+
+const char html_config[] PROGMEM = R""""(
+<div style='border: 1px solid black'>
+Build time: %s<br>
+Boot time: %s<br>
+Last reading: %s<br>
+IP: %s<br>
+ESP.getSketchSize(): %d<br>
+ESP.getFreeSketchSpace(): %d<br>
+fs_info.totalBytes(): %d<br>
+fs_info.usedBytes(): %d<br>
+</div>
+<div style='border: 1px solid black'>
+<form action='/config' method='POST'>
+<label for='mqtt_server'>MQTT Broker IP:</label>
+<input type='text' name='mqtt_server' value='%s'><br>
+<label for='mqtt_server_port'>MQTT Broker Port:</label>
+<input type='text' name='mqtt_server_port' value='%d'><br>
+<input type='hidden' name='s' value='1'>
+<input type='submit' value='SAVE'></form>
+</div>
+<a href='update'><button>UPDATE</button></a>
+<a href='reboot'><button>REBOOT</button></a>
+<a href='reset'><button>RESET</button></a>
+)"""";
+
+const char html_javascript[] PROGMEM = R""""(];
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+var myChart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: l,
+    datasets: [{
+      label: 'Temperature',
+      data: t,
+      borderColor: 'rgb(255, 0, 0)',
+      backgroundColor: 'rgb(255, 0, 0, 0.1)',
+      tension: 0.1,
+    }, {
+      label: 'Humidity',
+      data: h,
+      borderColor: 'rgb(0, 0, 255)',
+      backgroundColor: 'rgb(0, 0, 255, 0.1)',
+      tension: 0.1,}]
+    },
+  }
+);
+</script>
 )"""";
 
 void get_sensors() {
@@ -109,8 +182,6 @@ void send_html(const char *z) {
 
 void handle_404() { send_html("<p>Not found!</p>"); }
 
-#define GRAPH_RANGE 24 * 7
-
 void handle_root() {
   // root
   char buf[512];
@@ -129,7 +200,7 @@ void handle_root() {
   int count = (th_index > GRAPH_RANGE) ? GRAPH_RANGE : th_index;
   int start = (th_index > GRAPH_RANGE) ? th_index - GRAPH_RANGE : 0;
 
-  // write data
+  // write javascript variables
   server.sendContent("<script>const t = [");
   for (int i = 0; i < count; i++) {
     snprintf_P(buf, sizeof(buf), "%.01f,", th_info[start + i].temperature);
@@ -147,31 +218,7 @@ void handle_root() {
   }
 
   // write javascript
-  server.sendContent_P(PSTR(R""""(];
-var canvas = document.getElementById('c');
-var ctx = canvas.getContext('2d');
-var myChart = new Chart(ctx, {
-  type: 'line',
-  data: {
-    labels: l,
-    datasets: [{
-      label: 'Temperature',
-      data: t,
-      borderColor: 'rgb(255, 0, 0)',
-      backgroundColor: 'rgb(255, 0, 0, 0.1)',
-      tension: 0.1,
-    }, {
-      label: 'Humidity',
-      data: h,
-      borderColor: 'rgb(0, 0, 255)',
-      backgroundColor: 'rgb(0, 0, 255, 0.1)',
-      tension: 0.1,}]
-    },
-  }
-);
-</script>
-)""""));
-
+  server.sendContent_P(html_javascript);
   server.sendContent(html_footer);
 }
 
@@ -179,62 +226,38 @@ void handle_raw() {
   // raw data
   char buf[512];
   get_sensors();
-  snprintf(buf, sizeof(buf), "%f\n%f\n", temperature, humidity);
+  snprintf(buf, sizeof(buf), "%.2f\n%.2f\n", temperature, humidity);
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send_P(200, "text/plain", buf);
 }
 
 void handle_config() {
-  // info
-  char buf[2048];
-  sensor_t sensor_t, sensor_h;
+  if (server.hasArg("s")) {
+    strncpy(eeprom.mqtt_server, server.arg("mqtt_server").c_str(),
+            sizeof(eeprom.mqtt_server));
+    eeprom.mqtt_server_port = server.arg("mqtt_server_port").toInt();
+    EEPROM.put(0, eeprom);
+    EEPROM.commit();
+    server.send(200, "text/html",
+                "<meta http-equiv='refresh' content='0; url=/config' />");
+  } else {
+    // info
+    char buf[1536];
 
-  dht.temperature().getSensor(&sensor_t);
-  dht.humidity().getSensor(&sensor_h);
+    FSInfo fs_info;
+    SPIFFS.info(fs_info);
 
-  FSInfo fs_info;
-  SPIFFS.info(fs_info);
+    char t1[32], t2[32];
+    ctime_r(&boot_time, t1);
+    ctime_r(&current_time, t2);
 
-  snprintf_P(
-      buf, sizeof(buf),
-      PSTR("<div style='border: 1px solid black'>Build time: %s<br>Boot time: "
-           "%s<br>Last reading: %s<br>IP: %s<br><br>"
-
-           "ESP8266_INFO<br>ESP.getBootMode(): %d<br>ESP.getSdkVersion(): "
-           "%s<br>ESP.getBootVersion(): %d<br>ESP.getChipId(): %08x<br>    "
-           "ESP.getFlashChipSize(): %d<br>ESP.getFlashChipRealSize(): "
-           "%d<br>ESP.getFlashChipSizeByChipId(): %d<br>ESP.getFlashChipId(): "
-           "%08x<br>ESP.getFreeHeap(): %d<br>ESP.getSketchSize(): "
-           "%d<br>ESP.getFreeSketchSpace(): %d<br><br>"
-
-           "DHT11_TEMP<br>t.sensor(): %s<br>t.driver(): %d<br>t.id(): "
-           "%d<br>t.max(): %f<br>t.min(): %f<br>t.resolution(): %f<br><br>"
-
-           "DHT11_HUMIDITY<br>h.sensor(): %s<br>h.driver(): %d<br>h.id(): "
-           "%d<br>h.max(): %f<br>h.min(): %f<br>h.resolution(): %f<br><br>"
-
-           "FS_INFO<br>fs_info.totalBytes(): %d<br>fs_info.usedBytes(): "
-           "%d<br>fs_info.blockSize(): %d<br>fs_info.pageSize(): "
-           "%d<br>fs_info.maxOpenFiles(): %d<br>fs_info.maxPathLength(): "
-           "%d<br><br></div>"
-
-           "<a href='update'><button>UPDATE</button></a>\n<a "
-           "href='reboot'><button>REBOOT</button></a>\n<a "
-           "href='reset'><button>RESET</button></a>\n"),
-      __DATE__ " " __TIME__, ctime(&boot_time),
-      notime ? "<font color='red'>NOTIME</font>" : ctime(&current_time),
-      WiFi.localIP().toString().c_str(), ESP.getBootMode(), ESP.getSdkVersion(),
-      ESP.getBootVersion(), ESP.getChipId(), ESP.getFlashChipSize(),
-      ESP.getFlashChipRealSize(), ESP.getFlashChipSizeByChipId(),
-      ESP.getFlashChipId(), ESP.getFreeHeap(), ESP.getSketchSize(),
-      ESP.getFreeSketchSpace(), sensor_t.name, sensor_t.version,
-      sensor_t.sensor_id, sensor_t.max_value, sensor_t.min_value,
-      sensor_t.resolution, sensor_h.name, sensor_h.version, sensor_h.sensor_id,
-      sensor_h.max_value, sensor_h.min_value, sensor_h.resolution,
-      fs_info.totalBytes, fs_info.usedBytes, fs_info.blockSize,
-      fs_info.pageSize, fs_info.maxOpenFiles, fs_info.maxPathLength);
-
-  send_html(buf);
+    snprintf_P(buf, sizeof(buf), html_config, __DATE__ " " __TIME__, t1,
+               notime ? "<font color='red'>NOTIME</font>" : t2,
+               WiFi.localIP().toString().c_str(), ESP.getSketchSize(),
+               ESP.getFreeSketchSpace(), fs_info.totalBytes, fs_info.usedBytes,
+               eeprom.mqtt_server, eeprom.mqtt_server_port);
+    send_html(buf);
+  }
 }
 
 void handle_reboot() {
@@ -247,6 +270,10 @@ void handle_reboot() {
 }
 
 void handle_reset() {
+  // erase eeprom
+  eeprom = {};
+  EEPROM.put(0, eeprom);
+  EEPROM.commit();
   // reset wifi credentials
   wm.resetSettings();
   handle_reboot();
@@ -255,8 +282,8 @@ void handle_reset() {
 void handle_files() {
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   char buf[512];
-  // download
   if (server.hasArg("n")) {
+    // download
     String fname = server.arg("n");
     File f = SPIFFS.open(fname, "r");
     server.setContentLength(f.size());
@@ -267,24 +294,20 @@ void handle_files() {
       server.sendContent(buf, r);
     } while (r == sizeof(buf));
     f.close();
-  } else if (server.hasArg("x"))
-  // delete
-  {
+  } else if (server.hasArg("x")) {
+    // delete
     String fname = server.arg("x");
     SPIFFS.remove(fname);
     server.send(200, "text/html",
                 "<script>document.location.href = '/files'</script>");
-  } else
-  // dir list
-  {
+  } else {
+    // dir
     String s;
     server.send_P(200, "text/html", html_header);
-
     server.sendContent("<div style='border: 1px solid black'>");
 
-    //    Dir dir = SPIFFS.openDir("/");
+    // scan files
     Dir dir = SPIFFS.openDir("");
-
     while (dir.next()) {
       if (dir.isFile()) {
         s = "<a download='" + dir.fileName() +
@@ -298,7 +321,7 @@ void handle_files() {
         server.sendContent(s);
       }
     }
-    // server.sendContent("<br><br><a href='/'><button>BACK</button></a><br>");
+
     server.sendContent("</div>");
     server.sendContent(html_footer);
   }
@@ -317,6 +340,15 @@ void get_time() {
 }
 
 void setup() {
+  EEPROM.begin(sizeof(eeprom_data));
+
+  // if there's valid EEPROM config, load it
+  EEPROM.get(0, eeprom);
+  if (eeprom.sign != EEPROM_SIGNATURE) {
+    // default eeprom
+    eeprom = {};
+  }
+
   // setup WIFI
   WiFi.mode(WIFI_STA);
   delay(10);
@@ -331,6 +363,10 @@ void setup() {
     ESP.restart();
     delay(1 * 1000);
   }
+
+  // mqtt setup
+  mqtt.setServer(eeprom.mqtt_server, eeprom.mqtt_server_port);
+  mqtt.setCallback([](char *, byte *, unsigned int) {});
 
   // install www handlers
   httpUpdater.setup(&server, "/update");
@@ -411,6 +447,18 @@ void loop() {
   MDNS.update();
   SSDP_esp8266.handleClient();
 
+  if (!mqtt.connected() ||
+      (millis() - mqtt_interval) >= (MQTT_REFRESH * 60 * 1000UL)) {
+    mqtt_interval = millis();
+    mqtt.connect("CLIMA");
+    mqtt.publish(MQTT_CLIMA_LOCALIP, WiFi.localIP().toString().c_str());
+    snprintf(buf, sizeof(buf), "%.2f", temperature);
+    mqtt.publish(MQTT_CLIMA_TEMPERATURE, buf);
+    snprintf(buf, sizeof(buf), "%.2f", humidity);
+    mqtt.publish(MQTT_CLIMA_HUMIDITY, buf);
+  }
+  mqtt.loop();
+
   // we cant do anything till we get the clock
   if (notime) {
     get_time();
@@ -444,6 +492,7 @@ void loop() {
         f.close();
       }
 
+#ifdef DAILY_FILE
       //  check if day changed
       if (now.tm_mday != last.tm_mday) {
         // gera nome do arquivo
@@ -451,6 +500,7 @@ void loop() {
         // write arquivo diario
         dump_csv(buf, (th_index < 24) ? 0 : (th_index - 25));
       }
+#endif
 
       // check if month changed
       if (now.tm_mon != last.tm_mon) {
