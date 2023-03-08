@@ -34,6 +34,8 @@
 #include <SSDP_esp8266.h>
 #include <WiFiManager.h>
 
+#include "version.h"
+
 #define DAILY_FILE
 
 const char *device_name = "CLIMA";
@@ -108,7 +110,7 @@ const char html_footer[] PROGMEM = R""""(
 
 const char html_config[] PROGMEM = R""""(
 <div style='border: 1px solid black'>
-Build time: %s<br>
+Version: %s<br>
 Boot time: %s<br>
 Last reading: %s<br>
 IP: %s<br>
@@ -251,7 +253,7 @@ void handle_config() {
     ctime_r(&boot_time, t1);
     ctime_r(&current_time, t2);
 
-    snprintf_P(buf, sizeof(buf), html_config, __DATE__ " " __TIME__, t1,
+    snprintf_P(buf, sizeof(buf), html_config, VERSION, t1,
                notime ? "<font color='red'>NOTIME</font>" : t2,
                WiFi.localIP().toString().c_str(), ESP.getSketchSize(),
                ESP.getFreeSketchSpace(), fs_info.totalBytes, fs_info.usedBytes,
@@ -365,8 +367,10 @@ void setup() {
   }
 
   // mqtt setup
-  mqtt.setServer(eeprom.mqtt_server, eeprom.mqtt_server_port);
-  mqtt.setCallback([](char *, byte *, unsigned int) {});
+  if (strlen(eeprom.mqtt_server)) {
+    mqtt.setServer(eeprom.mqtt_server, eeprom.mqtt_server_port);
+    mqtt.setCallback([](char *, byte *, unsigned int) {});
+  }
 
   // install www handlers
   httpUpdater.setup(&server, "/update");
@@ -447,8 +451,9 @@ void loop() {
   MDNS.update();
   SSDP_esp8266.handleClient();
 
-  if (!mqtt.connected() ||
-      (millis() - mqtt_interval) >= (MQTT_REFRESH * 60 * 1000UL)) {
+  if ((strlen(eeprom.mqtt_server)) &&
+      (!mqtt.connected() ||
+       ((millis() - mqtt_interval) >= (MQTT_REFRESH * 60 * 1000UL)))) {
     mqtt_interval = millis();
     mqtt.connect("CLIMA");
     mqtt.publish(MQTT_CLIMA_LOCALIP, WiFi.localIP().toString().c_str());
