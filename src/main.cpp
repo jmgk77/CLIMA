@@ -1,7 +1,5 @@
 // CLIMA
 //
-// Firmware for https://aliexpress.com/item/32840839415.html
-//
 // * show current temp/humidty
 // * show current month temp/humidty graph
 // * save daily/monthly info in CSV format
@@ -10,7 +8,11 @@
 // * WiFi wizard
 // * SSDP, LLMR, MDNS. NBNS discovery protocols
 // * MQTT support
-
+//
+// v1:
+// * SHT30 support
+// * WeMos D1
+//
 // ??? show monthly history (read from disk)
 
 #if !defined(ESP8266)
@@ -19,9 +21,6 @@
 
 #include <Arduino.h>
 
-#include <Adafruit_Sensor.h>
-#include <DHT.h>
-#include <DHT_U.h>
 #include <ESP8266HTTPUpdateServer.h>
 #include <ESP8266LLMNR.h>
 #include <ESP8266NetBIOS.h>
@@ -32,6 +31,7 @@
 #include <FS.h>
 #include <PubSubClient.h>
 #include <SSDP_esp8266.h>
+#include <WEMOS_SHT3X.h>
 #include <WiFiManager.h>
 
 #include "version.h"
@@ -46,9 +46,7 @@ bool notime;
 time_t boot_time, current_time;
 
 // sensor
-#define DHTPIN 2      // Pin which is connected to the DHT sensor.
-#define DHTTYPE DHT11 // DHT 11
-DHT_Unified dht(DHTPIN, DHTTYPE);
+SHT3X sht30(0x44);
 float temperature = 0, humidity = 0;
 
 // mqtt
@@ -160,19 +158,13 @@ var myChart = new Chart(ctx, {
 
 void get_sensors() {
   // read sensors
-  sensors_event_t event;
 
   temperature = 0;
   humidity = 0;
 
-  dht.temperature().getEvent(&event);
-  if (!isnan(event.temperature)) {
-    temperature = (float)event.temperature;
-  }
-  dht.humidity().getEvent(&event);
-  if (!isnan(event.relative_humidity)) {
-    humidity = (float)event.relative_humidity;
-  }
+  sht30.get();
+  temperature = sht30.cTemp;
+  humidity = sht30.humidity;
 }
 
 void send_html(const char *z) {
@@ -403,9 +395,6 @@ void setup() {
   // set boot/current time
   get_time();
   current_time = boot_time = time(NULL);
-
-  // init sensor
-  dht.begin();
 
   // init filesystem
   SPIFFS.begin();
