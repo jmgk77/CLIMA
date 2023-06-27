@@ -47,7 +47,7 @@ TODO:
 
 #include "version.h"
 
-#define DAILY_FILE
+// #define DAILY_FILE
 
 const char *device_name = "CLIMA";
 
@@ -73,8 +73,11 @@ PubSubClient mqtt(mqtt_client);
 #define EEPROM_SIGNATURE 'J'
 struct eeprom_data {
   char sign = EEPROM_SIGNATURE;
+  bool mqtt_enabled;
   char mqtt_server[32]; // = "192.168.0.250";
   unsigned int mqtt_server_port = 1883;
+  char mqtt_username[32];
+  char mqtt_password[32];
 } eeprom;
 
 // www
@@ -137,13 +140,9 @@ fs_info.totalBytes(): %d<br>
 fs_info.usedBytes(): %d<br>
 </div>
 <div style='border: 1px solid black'>
-<form action='/config' method='POST'>
-<label for='mqtt_server'>MQTT Broker IP:</label>
-<input type='text' name='mqtt_server' value='%s'><br>
-<label for='mqtt_server_port'>MQTT Broker Port:</label>
-<input type='text' name='mqtt_server_port' value='%d'><br>
-<input type='hidden' name='s' value='1'>
-<input type='submit' value='SAVE'></form>
+)"""";
+
+const char html_config2[] PROGMEM = R""""(
 </div>
 <a href='update'><button>UPDATE</button></a>
 <a href='reboot'><button>REBOOT</button></a>
@@ -262,11 +261,34 @@ void handle_raw() {
   server.send_P(200, "text/plain", buf);
 }
 
+#define FORM_SAVE_STRING(VAR)                                                  \
+  strncpy(eeprom.VAR, server.arg(#VAR).c_str(), sizeof(eeprom.VAR));
+#define FORM_SAVE_INT(VAR) eeprom.VAR = server.arg(#VAR).toInt();
+#define FORM_SAVE_BOOL(VAR)                                                    \
+  eeprom.VAR = server.arg(#VAR) == "on" ? true : false;
+
+#define FORM_START(URL)                                                        \
+  s += "<form action='" + String(URL) + "' method='POST'>";
+#define FORM_ASK_VALUE(VAR, TXT)                                               \
+  s += "<label for='" + String(#VAR) + "'>" + String(TXT) +                    \
+       ":</label><input type='text' name='" + String(#VAR) + "' value='" +     \
+       eeprom.VAR + "'><br>";
+#define FORM_ASK_BOOL(VAR, TXT)                                                \
+  s += "<label for='" + String(#VAR) + "'>" + String(TXT) +                    \
+       ":</label><input type='checkbox' name='" + String(#VAR) + "' " +        \
+       String(eeprom.VAR ? "checked" : "") + "><br>";
+#define FORM_END(BTN)                                                          \
+  s +=                                                                         \
+      "<input type='hidden' name='s' value='1'><input type='submit' value='" + \
+      String(BTN) + "'></form><br>";
+
 void handle_config() {
   if (server.hasArg("s")) {
-    strncpy(eeprom.mqtt_server, server.arg("mqtt_server").c_str(),
-            sizeof(eeprom.mqtt_server));
-    eeprom.mqtt_server_port = server.arg("mqtt_server_port").toInt();
+    FORM_SAVE_BOOL(mqtt_enabled);
+    FORM_SAVE_STRING(mqtt_server);
+    FORM_SAVE_INT(mqtt_server_port);
+    FORM_SAVE_STRING(mqtt_username);
+    FORM_SAVE_STRING(mqtt_password);
     EEPROM.put(0, eeprom);
     EEPROM.commit();
     server.send(200, "text/html",
@@ -285,9 +307,19 @@ void handle_config() {
     snprintf_P(buf, sizeof(buf), html_config, VERSION, t1,
                notime ? "<font color='red'>NOTIME</font>" : t2,
                WiFi.localIP().toString().c_str(), ESP.getSketchSize(),
-               ESP.getFreeSketchSpace(), fs_info.totalBytes, fs_info.usedBytes,
-               eeprom.mqtt_server, eeprom.mqtt_server_port);
-    send_html(buf);
+               ESP.getFreeSketchSpace(), fs_info.totalBytes, fs_info.usedBytes);
+
+    String s = buf;
+    FORM_START("/config");
+    FORM_ASK_BOOL(mqtt_enabled, "MQTT");
+    FORM_ASK_VALUE(mqtt_server, "MQTT Broker IP");
+    FORM_ASK_VALUE(mqtt_server_port, "MQTT Broker Port");
+    FORM_ASK_VALUE(mqtt_username, "MQTT Username");
+    FORM_ASK_VALUE(mqtt_password, "MQTT Password");
+    FORM_END("Salvar");
+    s += html_config2;
+
+    send_html(s.c_str());
   }
 }
 
@@ -434,7 +466,7 @@ void setup() {
   }
 
   // mqtt setup
-  if (strlen(eeprom.mqtt_server)) {
+  if (eeprom.mqtt_enabled) {
     mqtt.setServer(eeprom.mqtt_server, eeprom.mqtt_server_port);
     mqtt.setCallback([](char *, byte *, unsigned int) {});
   }
@@ -507,11 +539,11 @@ void loop() {
   SSDP_esp8266.handleClient();
 
   // mqtt things
-  if ((strlen(eeprom.mqtt_server)) &&
+  if (eeprom.mqtt_enabled &&
       (!mqtt.connected() ||
        ((millis() - mqtt_interval) >= (MQTT_REFRESH * 60 * 1000UL)))) {
     mqtt_interval = millis();
-    mqtt.connect("CLIMA");
+    mqtt.connect("CLIMA", eeprom.mqtt_username, eeprom.mqtt_password);
     mqtt.publish(MQTT_CLIMA_LOCALIP, WiFi.localIP().toString().c_str());
     snprintf(buf, sizeof(buf), "%.2f", temperature);
     mqtt.publish(MQTT_CLIMA_TEMPERATURE, buf);
