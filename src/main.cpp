@@ -1,19 +1,30 @@
-// CLIMA
-//
-// * show current temp/humidty
-// * show current month temp/humidty graph
-// * save daily/monthly info in CSV format
-// * partial data survive reboots
-// * file server/update server
-// * WiFi wizard
-// * SSDP, LLMR, MDNS. NBNS discovery protocols
-// * MQTT support
-//
-// v1:
-// * SHT30 support
-// * WeMos D1
-//
-// ??? show monthly history (read from disk)
+/*
+ ██████╗██╗     ██╗███╗   ███╗ █████╗
+██╔════╝██║     ██║████╗ ████║██╔══██╗
+██║     ██║     ██║██╔████╔██║███████║
+██║     ██║     ██║██║╚██╔╝██║██╔══██║
+╚██████╗███████╗██║██║ ╚═╝ ██║██║  ██║
+ ╚═════╝╚══════╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
+*/
+
+/*
+v0:
+* show current temp/humidty
+* show current month temp/humidty graph
+* save daily/monthly info in CSV format
+* partial data survive reboots
+* file server/update server
+* WiFi wizard
+* SSDP, LLMR, MDNS. NBNS discovery protocols
+* MQTT support
+
+v1:
+* SHT30 support
+* WeMos D1
+
+TODO:
+* show monthly history (read from disk)
+*/
 
 #if !defined(ESP8266)
 #error This code is designed to run on ESP8266 and ESP8266-based boards! Please check your Tools->Board setting.
@@ -82,7 +93,15 @@ struct TH_INFO {
 TH_INFO th_info[MAX_TH_INFO];
 unsigned int th_index = 0;
 
-// html
+/*
+██╗  ██╗████████╗███╗   ███╗██╗
+██║  ██║╚══██╔══╝████╗ ████║██║
+███████║   ██║   ██╔████╔██║██║
+██╔══██║   ██║   ██║╚██╔╝██║██║
+██║  ██║   ██║   ██║ ╚═╝ ██║███████╗
+╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚═╝╚══════╝
+*/
+
 const char html_header[] PROGMEM = R""""(<!DOCTYPE html>
 <html lang='pt-br'>
 <head>
@@ -156,6 +175,15 @@ var myChart = new Chart(ctx, {
 </script>
 )"""";
 
+/*
+███████╗███████╗███╗   ██╗███████╗ ██████╗ ██████╗
+██╔════╝██╔════╝████╗  ██║██╔════╝██╔═══██╗██╔══██╗
+███████╗█████╗  ██╔██╗ ██║███████╗██║   ██║██████╔╝
+╚════██║██╔══╝  ██║╚██╗██║╚════██║██║   ██║██╔══██╗
+███████║███████╗██║ ╚████║███████║╚██████╔╝██║  ██║
+╚══════╝╚══════╝╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝
+*/
+
 void get_sensors() {
   // read sensors
 
@@ -166,6 +194,15 @@ void get_sensors() {
   temperature = sht30.cTemp;
   humidity = sht30.humidity;
 }
+
+/*
+██╗    ██╗███████╗██████╗
+██║    ██║██╔════╝██╔══██╗
+██║ █╗ ██║█████╗  ██████╔╝
+██║███╗██║██╔══╝  ██╔══██╗
+╚███╔███╔╝███████╗██████╔╝
+ ╚══╝╚══╝ ╚══════╝╚═════╝
+*/
 
 void send_html(const char *z) {
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
@@ -321,6 +358,15 @@ void handle_files() {
   }
 }
 
+/*
+███╗   ███╗██╗███████╗ ██████╗
+████╗ ████║██║██╔════╝██╔════╝
+██╔████╔██║██║███████╗██║
+██║╚██╔╝██║██║╚════██║██║
+██║ ╚═╝ ██║██║███████║╚██████╗
+╚═╝     ╚═╝╚═╝╚══════╝ ╚═════╝
+*/
+
 void get_time() {
   // get internet time
   configTime("<-03>3", "pool.ntp.org");
@@ -332,6 +378,35 @@ void get_time() {
   }
   notime = (time(nullptr) < 1609459200) ? true : false;
 }
+
+void dump_csv(char *nome, unsigned int inicio) {
+  char buf[64];
+
+  // create
+  File f = SPIFFS.open(nome, "w");
+  if (f) {
+    // CSV header
+    f.printf("Hora, Data, Temperatura, Umidade\n");
+    // loop database
+    for (unsigned int i = inicio; i < (th_index - 1); i++) {
+      // write
+      strftime(buf, sizeof(buf), "%T, %d-%m-%Y", localtime(&th_info[i].tempo));
+      f.printf("%s, %.01f, %.01f\n", buf, th_info[i].temperature,
+               th_info[i].humidity);
+    }
+    // close
+    f.close();
+  }
+}
+
+/*
+███████╗███████╗████████╗██╗   ██╗██████╗
+██╔════╝██╔════╝╚══██╔══╝██║   ██║██╔══██╗
+███████╗█████╗     ██║   ██║   ██║██████╔╝
+╚════██║██╔══╝     ██║   ██║   ██║██╔═══╝
+███████║███████╗   ██║   ╚██████╔╝██║
+╚══════╝╚══════╝   ╚═╝    ╚═════╝ ╚═╝
+*/
 
 void setup() {
   EEPROM.begin(sizeof(eeprom_data));
@@ -410,27 +485,18 @@ void setup() {
       current_time = th_info[th_index - 1].tempo;
     }
   }
+
+  // setup end
 }
 
-void dump_csv(char *nome, unsigned int inicio) {
-  char buf[64];
-
-  // create
-  File f = SPIFFS.open(nome, "w");
-  if (f) {
-    // CSV header
-    f.printf("Hora, Data, Temperatura, Humidade\n");
-    // loop database
-    for (unsigned int i = inicio; i < (th_index - 1); i++) {
-      // write
-      strftime(buf, sizeof(buf), "%T, %d-%m-%Y", localtime(&th_info[i].tempo));
-      f.printf("%s, %.01f, %.01f\n", buf, th_info[i].temperature,
-               th_info[i].humidity);
-    }
-    // close
-    f.close();
-  }
-}
+/*
+██╗      ██████╗  ██████╗ ██████╗
+██║     ██╔═══██╗██╔═══██╗██╔══██╗
+██║     ██║   ██║██║   ██║██████╔╝
+██║     ██║   ██║██║   ██║██╔═══╝
+███████╗╚██████╔╝╚██████╔╝██║
+╚══════╝ ╚═════╝  ╚═════╝ ╚═╝
+*/
 
 void loop() {
   char buf[64];
@@ -440,6 +506,7 @@ void loop() {
   MDNS.update();
   SSDP_esp8266.handleClient();
 
+  // mqtt things
   if ((strlen(eeprom.mqtt_server)) &&
       (!mqtt.connected() ||
        ((millis() - mqtt_interval) >= (MQTT_REFRESH * 60 * 1000UL)))) {
@@ -513,4 +580,6 @@ void loop() {
       }
     }
   }
+
+  // loop end
 }
