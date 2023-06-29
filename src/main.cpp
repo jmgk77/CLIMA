@@ -74,7 +74,7 @@ PubSubClient mqtt(mqtt_client);
 struct eeprom_data {
   char sign = EEPROM_SIGNATURE;
   bool mqtt_enabled;
-  char mqtt_server[32]; // = "192.168.0.250";
+  char mqtt_server[128]; // = "192.168.0.250";
   unsigned int mqtt_server_port = 1883;
   char mqtt_username[32];
   char mqtt_password[32];
@@ -324,7 +324,7 @@ void handle_config() {
 }
 
 void handle_reboot() {
-  // reboot ESP01
+  // reboot ESP8266
   server.send(200, "text/html",
               "<meta http-equiv='refresh' content='30; url=/' />");
   delay(1 * 1000);
@@ -539,18 +539,20 @@ void loop() {
   SSDP_esp8266.handleClient();
 
   // mqtt things
-  if (eeprom.mqtt_enabled &&
-      (!mqtt.connected() ||
-       ((millis() - mqtt_interval) >= (MQTT_REFRESH * 60 * 1000UL)))) {
-    mqtt_interval = millis();
-    mqtt.connect("CLIMA", eeprom.mqtt_username, eeprom.mqtt_password);
-    mqtt.publish(MQTT_CLIMA_LOCALIP, WiFi.localIP().toString().c_str());
-    snprintf(buf, sizeof(buf), "%.2f", temperature);
-    mqtt.publish(MQTT_CLIMA_TEMPERATURE, buf);
-    snprintf(buf, sizeof(buf), "%.2f", humidity);
-    mqtt.publish(MQTT_CLIMA_HUMIDITY, buf);
+  if (eeprom.mqtt_enabled) {
+    if (!mqtt.connected()) {
+      mqtt.connect(device_name, eeprom.mqtt_username, eeprom.mqtt_password);
+    }
+    if ((millis() - mqtt_interval) >= (MQTT_REFRESH * 60 * 1000UL)) {
+      mqtt_interval = millis();
+      mqtt.publish(MQTT_CLIMA_LOCALIP, WiFi.localIP().toString().c_str());
+      snprintf(buf, sizeof(buf), "%.2f", temperature);
+      mqtt.publish(MQTT_CLIMA_TEMPERATURE, buf);
+      snprintf(buf, sizeof(buf), "%.2f", humidity);
+      mqtt.publish(MQTT_CLIMA_HUMIDITY, buf);
+    }
+    mqtt.loop();
   }
-  mqtt.loop();
 
   // we cant do anything till we get the clock
   if (notime) {
