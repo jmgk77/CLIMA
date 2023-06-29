@@ -85,6 +85,8 @@ WiFiManager wm;
 ESP8266WebServer server;
 ESP8266HTTPUpdateServer httpUpdater;
 
+#define ENABLE_WWW_UPLOAD
+
 // graph
 #define GRAPH_RANGE 24 * 7
 #define MAX_TH_INFO 24 * 32
@@ -384,11 +386,31 @@ void handle_files() {
         server.sendContent(s);
       }
     }
-
+#ifdef ENABLE_WWW_UPLOAD
+    server.sendContent(
+        "<form action='/upload' method='POST' "
+        "enctype='multipart/form-data'><input type='file' name='name'><input "
+        "class='button' type='submit' value='Upload'></form>");
+#endif
     server.sendContent("</div>");
     server.sendContent(html_footer);
   }
 }
+
+#ifdef ENABLE_WWW_UPLOAD
+File fsUploadFile;
+
+void handle_upload() {
+  HTTPUpload &upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    fsUploadFile = SPIFFS.open("/" + upload.filename, "w");
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    fsUploadFile.write(upload.buf, upload.currentSize);
+  } else if (upload.status == UPLOAD_FILE_END) {
+    fsUploadFile.close();
+  }
+}
+#endif
 
 /*
 ███╗   ███╗██╗███████╗ ██████╗
@@ -482,6 +504,15 @@ void setup() {
   server.on("/files", handle_files);
   server.on("/description.xml", HTTP_GET,
             []() { SSDP_esp8266.schema(server.client()); });
+#ifdef ENABLE_WWW_UPLOAD
+  server.on(
+      "/upload", HTTP_POST,
+      []() {
+        server.send(200, "text/html",
+                    "<meta http-equiv='refresh' content='0; url=/files' />");
+      },
+      handle_upload);
+#endif
   server.begin();
 
   // discovery protocols
