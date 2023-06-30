@@ -173,6 +173,36 @@ var myChart = new Chart(ctx, {
     },
   }
 );
+canvas = document.getElementById('a');
+ctx = canvas.getContext('2d');
+myChart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: l.slice(-24),
+    datasets: [{
+      label: 'Temperature',
+      data: t.slice(-24),
+      borderColor: 'rgb(255, 0, 0)',
+      backgroundColor: 'rgb(255, 0, 0, 0.1)',
+      tension: 0.1,
+    }]
+  },
+});
+canvas = document.getElementById('b');
+ctx = canvas.getContext('2d');
+myChart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: l.slice(-24),
+    datasets: [{
+      label: 'Humidity',
+      data: h.slice(-24),
+      borderColor: 'rgb(0, 0, 255)',
+      backgroundColor: 'rgb(0, 0, 255, 0.1)',
+      tension: 0.1,
+    }]
+  },
+});
 </script>
 )"""";
 
@@ -221,7 +251,10 @@ void handle_root() {
   snprintf_P(buf, sizeof(buf),
              PSTR("<div style='border: 1px solid black'>Temperature: %.01f<br>"
                   "Humidity: %.01f<br>"
-                  "<canvas id='c' width='600' height='200'></canvas></div>"),
+                  "<br><canvas id='a' width='600' height='200'></canvas>"
+                  "<br><canvas id='b' width='600' height='200'></canvas>"
+                  "<br><canvas id='c' width='600' height='200'></canvas>"
+                  "</div>"),
              temperature, humidity, th_index);
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
