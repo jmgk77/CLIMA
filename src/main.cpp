@@ -7,7 +7,7 @@
  ╚═════╝╚══════╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
 */
 
-/*
+/*s
 v0:
 * show current temp/humidty
 * show current month temp/humidty graph
@@ -29,6 +29,8 @@ TODO:
 #if !defined(ESP8266)
 #error This code is designed to run on ESP8266 and ESP8266-based boards! Please check your Tools->Board setting.
 #endif
+
+// #define DEBUG
 
 #include <Arduino.h>
 
@@ -224,6 +226,9 @@ void get_sensors() {
   sht30.get();
   temperature = sht30.cTemp;
   humidity = sht30.humidity;
+#ifdef DEBUG
+  Serial.println("SENSOR");
+#endif
 }
 
 /*
@@ -242,10 +247,19 @@ void send_html(const char *z) {
   server.sendContent(html_footer);
 }
 
-void handle_404() { send_html("<p>Not found!</p>"); }
+void handle_404() {
+#ifdef DEBUG
+  Serial.println("WWW 404");
+#endif
+  send_html("<p>Not found!</p>");
+}
 
 void handle_root() {
-  // root
+// root
+#ifdef DEBUG
+  Serial.println("WWW ROOT");
+#endif
+
   char buf[512];
   get_sensors();
   snprintf_P(buf, sizeof(buf),
@@ -288,7 +302,11 @@ void handle_root() {
 }
 
 void handle_raw() {
-  // raw data
+// raw data
+#ifdef DEBUG
+  Serial.println("WWW RAW");
+#endif
+
   char buf[512];
   get_sensors();
   snprintf(buf, sizeof(buf), "%.2f\n%.2f\n", temperature, humidity);
@@ -319,6 +337,9 @@ void handle_raw() {
 
 void handle_config() {
   if (server.hasArg("s")) {
+#ifdef DEBUG
+    Serial.println("WWW CONFIG SAVE");
+#endif
     FORM_SAVE_BOOL(mqtt_enabled);
     FORM_SAVE_STRING(mqtt_server);
     FORM_SAVE_INT(mqtt_server_port);
@@ -329,7 +350,10 @@ void handle_config() {
     server.send(200, "text/html",
                 "<meta http-equiv='refresh' content='0; url=/config' />");
   } else {
-    // info
+// info
+#ifdef DEBUG
+    Serial.println("WWW CONFIG");
+#endif
     char buf[1536];
 
     FSInfo fs_info;
@@ -359,7 +383,11 @@ void handle_config() {
 }
 
 void handle_reboot() {
-  // reboot ESP8266
+// reboot ESP8266
+#ifdef DEBUG
+  Serial.println("WWW REBOOT");
+#endif
+
   server.send(200, "text/html",
               "<meta http-equiv='refresh' content='30; url=/' />");
   delay(1 * 1000);
@@ -368,7 +396,11 @@ void handle_reboot() {
 }
 
 void handle_reset() {
-  // erase eeprom
+// erase eeprom
+#ifdef DEBUG
+  Serial.println("WWW RESET");
+#endif
+
   eeprom = {};
   EEPROM.put(0, eeprom);
   EEPROM.commit();
@@ -381,6 +413,9 @@ void handle_files() {
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   char buf[512];
   if (server.hasArg("n")) {
+#ifdef DEBUG
+    Serial.println("WWW FILE DOWNLOAD");
+#endif
     // download
     String fname = server.arg("n");
     File f = SPIFFS.open(fname, "r");
@@ -393,13 +428,20 @@ void handle_files() {
     } while (r == sizeof(buf));
     f.close();
   } else if (server.hasArg("x")) {
+#ifdef DEBUG
+    Serial.println("WWW FILE DELETE");
+#endif
     // delete
     String fname = server.arg("x");
     SPIFFS.remove(fname);
     server.send(200, "text/html",
                 "<script>document.location.href = '/files'</script>");
   } else {
-    // dir
+// dir
+#ifdef DEBUG
+    Serial.println("WWW FILE");
+#endif
+
     String s;
     server.send_P(200, "text/html", html_header);
     server.sendContent("<div style='border: 1px solid black'>");
@@ -434,6 +476,9 @@ void handle_files() {
 File fsUploadFile;
 
 void handle_upload() {
+#ifdef DEBUG
+  Serial.println("WWW UPLOAD");
+#endif
   HTTPUpload &upload = server.upload();
   if (upload.status == UPLOAD_FILE_START) {
     fsUploadFile = SPIFFS.open("/" + upload.filename, "w");
@@ -496,6 +541,11 @@ void dump_csv(char *nome, unsigned int inicio) {
 */
 
 void setup() {
+#ifdef DEBUG
+  Serial.begin(115200);
+  Serial.println("SETUP");
+#endif
+
   EEPROM.begin(sizeof(eeprom_data));
 
   // if there's valid EEPROM config, load it
@@ -504,6 +554,9 @@ void setup() {
     // default eeprom
     eeprom = {};
   }
+#ifdef DEBUG
+  Serial.println("EEPROM");
+#endif
 
   // setup WIFI
   WiFi.mode(WIFI_STA);
@@ -513,17 +566,26 @@ void setup() {
   wm.setConfigPortalTimeout(180);
   WiFi.setAutoReconnect(true);
   WiFi.persistent(true);
+#ifdef DEBUG
+  Serial.println("WIFI");
+#endif
 
   // connect to wifi
   if (!wm.autoConnect(device_name)) {
     ESP.restart();
     delay(1 * 1000);
   }
+#ifdef DEBUG
+  Serial.println("CONNECT");
+#endif
 
   // mqtt setup
   if (eeprom.mqtt_enabled) {
     mqtt.setServer(eeprom.mqtt_server, eeprom.mqtt_server_port);
     mqtt.setCallback([](char *, byte *, unsigned int) {});
+#ifdef DEBUG
+    Serial.println("MQTT");
+#endif
   }
 
   // install www handlers
@@ -547,6 +609,9 @@ void setup() {
       handle_upload);
 #endif
   server.begin();
+#ifdef DEBUG
+  Serial.println("WWW");
+#endif
 
   // discovery protocols
   MDNS.begin(device_name);
@@ -562,13 +627,22 @@ void setup() {
   SSDP_esp8266.setModelNumber("1");
   SSDP_esp8266.setManufacturer("JMGK");
   SSDP_esp8266.setManufacturerURL("http://www.jmgk.com.br/");
+#ifdef DEBUG
+  Serial.println("DISCOVER");
+#endif
 
   // set boot/current time
   get_time();
   current_time = boot_time = time(NULL);
+#ifdef DEBUG
+  Serial.println("TIME");
+#endif
 
   // init filesystem
   SPIFFS.begin();
+#ifdef DEBUG
+  Serial.println("FS");
+#endif
 
   // load temporary binary cache
   File f = SPIFFS.open("/CACHE", "r");
@@ -581,6 +655,9 @@ void setup() {
       current_time = th_info[th_index - 1].tempo;
     }
   }
+#ifdef DEBUG
+  Serial.println("CACHE");
+#endif
 
   // setup end
 }
@@ -606,6 +683,9 @@ void loop() {
   if (eeprom.mqtt_enabled) {
     if (!mqtt.connected()) {
       mqtt.connect(device_name, eeprom.mqtt_username, eeprom.mqtt_password);
+#ifdef DEBUG
+      Serial.println("MQTT RECONNECT");
+#endif
     }
     if ((millis() - mqtt_interval) >= (MQTT_REFRESH * 60 * 1000UL)) {
       mqtt_interval = millis();
@@ -614,6 +694,9 @@ void loop() {
       mqtt.publish(MQTT_CLIMA_TEMPERATURE, buf);
       snprintf(buf, sizeof(buf), "%.2f", humidity);
       mqtt.publish(MQTT_CLIMA_HUMIDITY, buf);
+#ifdef DEBUG
+      Serial.println("MQTT REFRESH");
+#endif
     }
     mqtt.loop();
   }
@@ -650,6 +733,9 @@ void loop() {
         f.write((uint8_t *)&th_info, th_index * sizeof(TH_INFO));
         f.close();
       }
+#ifdef DEBUG
+      Serial.println("SAVE H");
+#endif
 
 #ifdef DAILY_FILE
       //  check if day changed
@@ -658,6 +744,9 @@ void loop() {
         strftime(buf, sizeof(buf), "/%d%m%Y.csv", &yesterday);
         // write arquivo diario
         dump_csv(buf, (th_index < 24) ? 0 : (th_index - 25));
+#ifdef DEBUG
+        Serial.println("SAVE D");
+#endif
       }
 #endif
 
@@ -675,6 +764,9 @@ void loop() {
 
         th_index = 1;
         SPIFFS.remove("/CACHE");
+#ifdef DEBUG
+        Serial.println("SAVE M");
+#endif
       }
     }
   }
