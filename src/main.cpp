@@ -7,7 +7,7 @@
  ╚═════╝╚══════╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
 */
 
-/*s
+/*
 v0:
 * show current temp/humidty
 * show current month temp/humidty graph
@@ -576,7 +576,7 @@ void setup() {
     delay(1 * 1000);
   }
 #ifdef DEBUG
-  Serial.println("CONNECT");
+  Serial.println("CONNECTED " + WiFi.localIP().toString());
 #endif
 
   // mqtt setup
