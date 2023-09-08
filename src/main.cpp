@@ -22,6 +22,9 @@ v1:
 * SHT30 support
 * WeMos D1
 
+v1.1:
+* BME280 support
+
 TODO:
 * show monthly history (read from disk)
 */
@@ -30,7 +33,13 @@ TODO:
 #error This code is designed to run on ESP8266 and ESP8266-based boards! Please check your Tools->Board setting.
 #endif
 
-// #define DEBUG
+#define DEBUG
+
+// #define DAILY_FILE
+
+#define SENSOR_BME280
+
+const char *device_name = "CLIMA";
 
 #include <Arduino.h>
 
@@ -44,14 +53,16 @@ TODO:
 #include <FS.h>
 #include <PubSubClient.h>
 #include <SSDP_esp8266.h>
-#include <WEMOS_SHT3X.h>
 #include <WiFiManager.h>
 
+#ifdef SENSOR_BME280
+#include <Adafruit_BME280.h>
+#include <Adafruit_Sensor.h>
+#else
+#include <WEMOS_SHT3X.h>
+#endif
+
 #include "version.h"
-
-// #define DAILY_FILE
-
-const char *device_name = "CLIMA";
 
 // time
 #define GETTIME_RETRIES 30
@@ -59,7 +70,26 @@ bool notime;
 time_t boot_time, current_time;
 
 // sensor
+#ifdef SENSOR_BME280
+// Adafruit_BME280 bme;
+// assign the ESP8266 pins to arduino pins
+#define D1 5
+#define D2 4
+#define D4 2
+#define D3 0
+
+// assign the SPI bus to pins
+#define BME_SCK D1
+#define BME_MISO D4
+#define BME_MOSI D2
+#define BME_CS D3
+
+#define SEALEVELPRESSURE_HPA (1013.25)
+
+Adafruit_BME280 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK); // software SPI
+#else
 SHT3X sht30(0x44);
+#endif
 float temperature = 0, humidity = 0;
 
 // mqtt
@@ -223,9 +253,18 @@ void get_sensors() {
   temperature = 0;
   humidity = 0;
 
+#ifdef SENSOR_BME280
+  temperature = bme.readTemperature();
+  humidity = bme.readHumidity();
+#ifdef DEBUG
+  Serial.print(bme.readPressure() / 100.0F);
+  Serial.println(" hPa");
+#endif
+#else
   sht30.get();
   temperature = sht30.cTemp;
   humidity = sht30.humidity;
+#endif
 #ifdef DEBUG
   Serial.println("SENSOR");
 #endif
@@ -636,6 +675,25 @@ void setup() {
   current_time = boot_time = time(NULL);
 #ifdef DEBUG
   Serial.println("TIME");
+#endif
+
+#ifdef SENSOR_BME280
+  unsigned status = bme.begin();
+  // You can also pass in a Wire library object like &Wire2
+  // status = bme.begin(0x76, &Wire2)
+  if (!status) {
+    Serial.println("Could not find a valid BME280 sensor, check wiring, "
+                   "address, sensor ID!");
+    Serial.print("SensorID was: 0x");
+    Serial.println(bme.sensorID(), 16);
+    Serial.print("        ID of 0xFF probably means a bad address, a BMP 180 "
+                 "or BMP 085\n");
+    Serial.print("   ID of 0x56-0x58 represents a BMP 280,\n");
+    Serial.print("        ID of 0x60 represents a BME 280.\n");
+    Serial.print("        ID of 0x61 represents a BME 680.\n");
+    while (1)
+      delay(10);
+  }
 #endif
 
   // init filesystem
