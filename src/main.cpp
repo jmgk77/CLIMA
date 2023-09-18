@@ -118,6 +118,8 @@ const char html_header[] PROGMEM = R""""(<!DOCTYPE html>
 <meta http-equiv='refresh' content='600; url=/'>
 <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
 <link rel='stylesheet' href='https://cdn.simplecss.org/simple.min.css'>
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/cferdinandi/tabby/dist/css/tabby-ui.min.css">
+<script src="https://cdn.jsdelivr.net/gh/cferdinandi/tabby/dist/js/tabby.polyfills.min.js"></script>
 <title>CLIMA</title>
 </head>
 <body><div style='text-align: center'>
@@ -130,6 +132,37 @@ const char html_footer[] PROGMEM = R""""(
 </div>
 </body>
 </html>
+)"""";
+
+const char html_main[] PROGMEM = R""""(
+  <ul data-tabs>
+      <li><a data-tabby-default href="#today">Today</a></li>
+      <li><a href="#month">Month</a></li>
+  </ul>
+  <div id="today" style="border: 1px solid black">
+      Temperature: %.01f
+      <font size="1">
+          <i>max(</i><i id="t_max">0</i><i>)</i>
+          <i>min(</i><i id="t_min">0</i><i>)</i>
+      </font>
+      <canvas id="a" width="718" height="239" style="display: block; box-sizing: border-box; height: 239px; width: 718px;"></canvas>
+      Humidity: %.01f
+      <font size="1">
+          <i>max(</i><i id="h_max">0</i><i>)</i>
+          <i>min(</i><i id="h_min">0</i><i>)</i>
+      </font>
+      <canvas id="b" width="718" height="239" style="display: block; box-sizing: border-box; height: 239px; width: 718px;"></canvas>
+      <font size="1">
+          <input type="checkbox" id="yesterday" onclick="check_box(this.checked)">show yesterday</input>
+      </font>
+  </div>
+  <div id="month" style="border: 1px solid black">
+      <canvas id="c" width="718" height="239" style="display: block; box-sizing: border-box; height: 239px; width: 718px;"></canvas>
+  </div>
+</div>
+<script>
+ var tabs = new Tabby('[data-tabs]');
+</script>
 )"""";
 
 const char html_config[] PROGMEM = R""""(
@@ -171,40 +204,87 @@ var myChart = new Chart(ctx, {
       data: h,
       borderColor: 'rgb(0, 0, 255)',
       backgroundColor: 'rgb(0, 0, 255, 0.1)',
-      tension: 0.1,}]
-    },
-  }
-);
+      tension: 0.1,
+    }]
+  },
+});
 canvas = document.getElementById('a');
 ctx = canvas.getContext('2d');
+var today = t.slice(-24);
+while (today.length < 24) {
+  today.unshift(null);
+}
+var yesterday = t.slice(-48, -24);
+while (yesterday.length < 24) {
+  yesterday.unshift(null);
+}
+var dset = [{
+  label: 'Temperature',
+  data: today,
+  borderColor: 'rgb(255, 0, 0)',
+  backgroundColor: 'rgb(255, 0, 0, 0.1)',
+  tension: 0.1,
+}];
+var x = (localStorage.getItem('clima_yesterday') == "true" ? true : false);;
+document.getElementById('yesterday').checked = x;
+if (x) {
+  dset.push({
+    label: 'Temperature (yesterday)',
+    data: yesterday,
+    borderColor: 'rgb(255, 228, 228)',
+    backgroundColor: 'rgb(255, 228, 228, 0.5)',
+    tension: 0.1,
+  });
+}
+document.getElementById('t_max').textContent = Math.max(...today);
+document.getElementById('t_min').textContent = Math.min(...today);
 myChart = new Chart(ctx, {
   type: 'line',
   data: {
     labels: l.slice(-24),
-    datasets: [{
-      label: 'Temperature',
-      data: t.slice(-24),
-      borderColor: 'rgb(255, 0, 0)',
-      backgroundColor: 'rgb(255, 0, 0, 0.1)',
-      tension: 0.1,
-    }]
+    datasets: dset
   },
 });
 canvas = document.getElementById('b');
 ctx = canvas.getContext('2d');
+var today = h.slice(-24);
+while (today.length < 24) {
+  today.unshift(null);
+}
+var yesterday = h.slice(-48, -24);
+while (yesterday.length < 24) {
+  yesterday.unshift(null);
+}
+var dset = [{
+  label: 'Humidity',
+  data: today,
+  borderColor: 'rgb(0, 0, 255)',
+  backgroundColor: 'rgb(0, 0, 255, 0.1)',
+  tension: 0.1,
+}];
+if (x) {
+  dset.push({
+    label: 'Humidity (yesterday)',
+    data: yesterday,
+    borderColor: 'rgb(228, 228, 255)',
+    backgroundColor: 'rgb(228, 228, 255, 0.1)',
+    tension: 0.1,
+  });
+}
+document.getElementById('h_max').textContent = Math.max(...today);
+document.getElementById('h_min').textContent = Math.min(...today);
 myChart = new Chart(ctx, {
   type: 'line',
   data: {
     labels: l.slice(-24),
-    datasets: [{
-      label: 'Humidity',
-      data: h.slice(-24),
-      borderColor: 'rgb(0, 0, 255)',
-      backgroundColor: 'rgb(0, 0, 255, 0.1)',
-      tension: 0.1,
-    }]
+    datasets: dset
   },
 });
+
+function check_box(v) {
+  localStorage.setItem("clima_yesterday", v);
+  location.reload();
+}
 </script>
 )"""";
 
@@ -260,19 +340,13 @@ void handle_root() {
   Serial.println("WWW ROOT");
 #endif
 
-  char buf[512];
+  char buf[2048];
   get_sensors();
-  snprintf_P(buf, sizeof(buf),
-             PSTR("<div style='border: 1px solid black'>Temperature: %.01f<br>"
-                  "Humidity: %.01f<br>"
-                  "<br><canvas id='a' width='600' height='200'></canvas>"
-                  "<br><canvas id='b' width='600' height='200'></canvas>"
-                  "<br><canvas id='c' width='600' height='200'></canvas>"
-                  "</div>"),
-             temperature, humidity, th_index);
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send_P(200, "text/html", html_header);
+
+  snprintf_P(buf, sizeof(buf), html_main, temperature, humidity);
   server.sendContent(buf);
 
   // calcula quantos itens vamos mostrar
