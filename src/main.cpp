@@ -33,7 +33,6 @@ TODO:
 // #define DEBUG
 
 #include <Arduino.h>
-
 #include <ESP8266HTTPUpdateServer.h>
 #include <ESP8266LLMNR.h>
 #include <ESP8266NetBIOS.h>
@@ -64,9 +63,11 @@ float temperature = 0, humidity = 0;
 
 // mqtt
 #define MQTT_REFRESH 1
+#define MQTT_CLIMA_DESCRIPTION "CLIMA/DESCRIPTION"
 #define MQTT_CLIMA_LOCALIP "CLIMA/IP"
 #define MQTT_CLIMA_TEMPERATURE "CLIMA/TEMPERATURE"
 #define MQTT_CLIMA_HUMIDITY "CLIMA/HUMIDITY"
+
 unsigned long mqtt_interval;
 WiFiClient mqtt_client;
 PubSubClient mqtt(mqtt_client);
@@ -76,7 +77,7 @@ PubSubClient mqtt(mqtt_client);
 struct eeprom_data {
   char sign = EEPROM_SIGNATURE;
   bool mqtt_enabled;
-  char mqtt_server[128]; // = "192.168.0.250";
+  char mqtt_server[128];
   unsigned int mqtt_server_port = 1883;
   char mqtt_username[32];
   char mqtt_password[32];
@@ -388,21 +389,21 @@ void handle_raw() {
   server.send_P(200, "text/plain", buf);
 }
 
-#define FORM_SAVE_STRING(VAR)                                                  \
+#define FORM_SAVE_STRING(VAR) \
   strncpy(eeprom.VAR, server.arg(#VAR).c_str(), sizeof(eeprom.VAR));
 #define FORM_SAVE_INT(VAR) eeprom.VAR = server.arg(#VAR).toInt();
-#define FORM_SAVE_BOOL(VAR)                                                    \
+#define FORM_SAVE_BOOL(VAR) \
   eeprom.VAR = server.arg(#VAR) == "on" ? true : false;
 
-#define FORM_START(URL)                                                        \
+#define FORM_START(URL) \
   s += "<form action='" + String(URL) + "' method='POST'>";
-#define FORM_ASK_VALUE(VAR, TXT)                                               \
-  s += "<label for='" + String(#VAR) + "'>" + String(TXT) +                    \
-       ":</label><input type='text' name='" + String(#VAR) + "' value='" +     \
+#define FORM_ASK_VALUE(VAR, TXT)                                           \
+  s += "<label for='" + String(#VAR) + "'>" + String(TXT) +                \
+       ":</label><input type='text' name='" + String(#VAR) + "' value='" + \
        eeprom.VAR + "'><br>";
-#define FORM_ASK_BOOL(VAR, TXT)                                                \
-  s += "<label for='" + String(#VAR) + "'>" + String(TXT) +                    \
-       ":</label><input type='checkbox' name='" + String(#VAR) + "' " +        \
+#define FORM_ASK_BOOL(VAR, TXT)                                         \
+  s += "<label for='" + String(#VAR) + "'>" + String(TXT) +             \
+       ":</label><input type='checkbox' name='" + String(#VAR) + "' " + \
        String(eeprom.VAR ? "checked" : "") + "><br>";
 #define FORM_END(BTN)                                                          \
   s +=                                                                         \
@@ -763,6 +764,9 @@ void loop() {
     }
     if ((millis() - mqtt_interval) >= (MQTT_REFRESH * 60 * 1000UL)) {
       mqtt_interval = millis();
+
+      mqtt.publish(MQTT_CLIMA_DESCRIPTION,
+                   String(String("CLIMA ") + String(VERSION)).c_str());
       mqtt.publish(MQTT_CLIMA_LOCALIP, WiFi.localIP().toString().c_str());
       snprintf(buf, sizeof(buf), "%.2f", temperature);
       mqtt.publish(MQTT_CLIMA_TEMPERATURE, buf);
